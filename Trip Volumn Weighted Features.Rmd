@@ -1,0 +1,215 @@
+---
+title: "Trip Weights"
+author: "RWang"
+date: "October 28, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r basicfcn, include=FALSE}
+# can add quietly=T option to the require() function
+loadPkg = function(x) { if (!require(x,character.only=T, quietly =T)) { install.packages(x,dep=T,repos="http://cran.us.r-project.org"); if(!require(x,character.only=T)) stop("Package not found") } }
+```
+```{r LoadPackages, include=FALSE}
+loadPkg("cluster")
+loadPkg("dplyr")
+loadPkg("ggplot2")
+loadPkg("graphics")
+loadPkg("gridExtra")
+loadPkg("knitr")
+loadPkg("tidyverse")
+loadPkg ("pls")
+loadPkg("caret")
+loadPkg("ggrepel")
+loadPkg("modelr")
+loadPkg("purrr")
+loadPkg("haven")
+loadPkg("readxl")
+loadPkg("stringr")
+loadPkg("randomForest")
+loadPkg("factoextra")
+loadPkg("caret")
+```
+
+Create weight matrices for inward trips and outward trips, as inputs for subsequent weighted neighborhood characteristics. These are based on all trips by all members at all times.
+
+```{r Read Data}
+wddir <- "D:\\Users\\RWang\\Box Sync\\Inclusion&Innovation\\Data Collection and Process\\Capital Bikeshare"
+ACSfiledir <- "D:\\Users\\RWang\\Box Sync\\Inclusion&Innovation\\Data Collection and Process\\DC neighborhoods"
+datadir <- "D:\\Users\\RWang\\Box Sync\\Inclusion&Innovation\\Data Collection and Process\\Capital Bikeshare\\2017-capitalbikeshare-tripdata"
+
+trip_keep <- c("Index","Duration","Start.station.number","End.station.number","Member.type",
+                 "Start_hour","End_hour","DayWeek_S")
+trans_keep <- c("tcost_idx","fips11")
+tract_keep <- c("TERMINAL_N","OWNER","TRACTCE","GEOID")
+Trip_Tract_keep <- c("tractce_s","tractce_e","EOR_s","EOR_e","total_jobs_s","total_jobs_e")
+
+setwd(datadir)
+tripdata <- data.frame(read.csv("Clean21Sep.csv")) #3757777 observations
+setwd(ACSfiledir)
+ACSdata <- data.frame(read.csv("ACS_data_tr10.csv"))
+setwd(ACSfiledir)
+trans_index <- data.frame(read_excel("transportationindices_AFFH.xlsx"))
+setwd(wddir)
+tract_info <- data.frame(read_excel("station_with_tract_info.xlsx"))
+Trip_tractcharacteristics <- read_dta("D:/Users/RWang/Box Sync/Inclusion&Innovation/Data Collection and Process/Trip_tractcharacteristics.dta")
+
+tripdata <- tripdata[trip_keep]
+trans_index <- trans_index[trans_keep]
+tract_info <- tract_info[tract_keep]
+Trip_tractcharacteristics <- Trip_tractcharacteristics[Trip_Tract_keep]
+
+tripdata <- subset(merge(x=tripdata,y=tract_info,
+                         by.x = c("Start.station.number"),by.y = c("TERMINAL_N")),OWNER=="DC") #3302519 observations
+tripdata <- subset(tripdata, select= -c(OWNER))
+colnames(tripdata)[(length(colnames(tripdata)) - 1):length(colnames(tripdata))] <- purrr::map_chr(colnames(tripdata)[(length(colnames(tripdata)) - 1):length(colnames(tripdata))],paste0,"_S")
+
+tripdata <- subset(merge(x=tripdata,y=tract_info,
+                         by.x = c("End.station.number"),by.y = c("TERMINAL_N")),OWNER=="DC")
+tripdata <- subset(tripdata, select= -c(OWNER))
+colnames(tripdata)[(length(colnames(tripdata)) - 1):length(colnames(tripdata))] <- purrr::map_chr(colnames(tripdata)[(length(colnames(tripdata)) - 1):length(colnames(tripdata))],paste0,"_E") #3228864 observations
+
+tripdata <- merge(x=tripdata,y=trans_index,by.x = c("GEOID_S"),by.y = c("fips11"))
+colnames(tripdata)[length(colnames(tripdata))] <- paste0(colnames(tripdata)[length(colnames(tripdata))],"_S")
+
+tripdata <- merge(x=tripdata,y=trans_index,by.x = c("GEOID_E"),by.y = c("fips11"))
+colnames(tripdata)[length(colnames(tripdata))] <- paste0(colnames(tripdata)[length(colnames(tripdata))],"_E")
+
+ACSdata$Geo2010 <- stringr::str_pad(as.numeric(gsub('DC Tract ', '', ACSdata$Geo2010)) * 100,
+                                     6,side = "left",pad=0)
+tripdata <- merge(x=tripdata,y=ACSdata,
+                  by.x=c("TRACTCE_S"),by.y=c("Geo2010"))
+colnames(tripdata)[(length(colnames(tripdata)) - 15):length(colnames(tripdata))] <- purrr::map_chr(colnames(tripdata)[(length(colnames(tripdata)) - 15):length(colnames(tripdata))],paste0,"_S")
+tripdata <- merge(x=tripdata,y=ACSdata,
+                  by.x=c("TRACTCE_E"),by.y=c("Geo2010"))
+colnames(tripdata)[(length(colnames(tripdata)) - 15):length(colnames(tripdata))] <- purrr::map_chr(colnames(tripdata)[(length(colnames(tripdata)) - 15):length(colnames(tripdata))],paste0,"_E")
+
+Trip_chaS <- Trip_tractcharacteristics[,c(1,3,5)]
+colnames(Trip_chaS) <- gsub('_s', '', colnames(Trip_chaS))
+Trip_chaS <- Trip_chaS[!duplicated(Trip_chaS[,1]),]
+Trip_chaS$tractce <- stringr::str_pad(as.numeric(Trip_chaS$tractce),6,side = "left",pad=0)
+
+tripdata <-merge(x=tripdata,y=Trip_chaS,by.x=c("TRACTCE_S"),by.y=c("tractce"))
+colnames(tripdata)[(length(colnames(tripdata)) - 1):length(colnames(tripdata))] <- purrr::map_chr(colnames(tripdata)[(length(colnames(tripdata)) - 1):length(colnames(tripdata))],paste0,"_S")
+tripdata <- merge(x=tripdata,y=Trip_chaS,by.x=c("TRACTCE_E"),by.y=c("tractce"))
+colnames(tripdata)[(length(colnames(tripdata)) - 1):length(colnames(tripdata))] <- purrr::map_chr(colnames(tripdata)[(length(colnames(tripdata)) - 1):length(colnames(tripdata))],paste0,"_E")
+
+rm(trip_keep,trans_keep,tract_keep,Trip_tractcharacteristics,tract_info,Trip_chaS,Trip_Tract_keep)
+```
+
+```{r In-Trip Matrix}
+keep <- c("TRACTCE_E","TRACTCE_S","EOR_S","EOR_E","total_jobs_S","total_jobs_E")
+tripdata_in <- tripdata[, (names(tripdata) %in% keep)]
+rm(keep)
+tripdata_in <-
+tripdata_in %>%
+  group_by(TRACTCE_S,TRACTCE_E) %>%
+  summarise(n = n(),
+            EOR_E = mean(EOR_E),EOR_S = mean(EOR_S),
+            total_jobs_E = mean(total_jobs_E),total_jobs_S = mean(total_jobs_S))
+tripdata_in$tot_E <- ave(tripdata_in$n, tripdata_in$TRACTCE_E, FUN=sum)
+tripdata_in$tot_S <- ave(tripdata_in$n, tripdata_in$TRACTCE_S, FUN=sum)
+
+tripdata_in$EOR_E[tripdata_in$EOR_E==9] <- 0
+tripdata_in$EOR_S[tripdata_in$EOR_S==9] <- 0
+
+# tot_E: total trips ending in a given tract_E
+# tot_S: total trips starting from a given tract_S
+# S characteristics should be weighted by tot_E, and vice versa
+# S trips in EOR trips should be scaled by tot_S, and vice versa
+tripdata_in[c("total_jobs_E")] <-
+  map(tripdata_in[c("total_jobs_E")],function(x) x * tripdata_in$n / tripdata_in$tot_S) 
+tripdata_in[c("total_jobs_E")] <-
+  map(tripdata_in[c("total_jobs_E")],function(x) ave(x,tripdata_in$TRACTCE_S,FUN=sum))
+colnames(tripdata_in)[6] <- "total_jobs_Eweight"
+
+tripdata_in[c("total_jobs_S")] <-
+  map(tripdata_in[c("total_jobs_S")],function(x) x * tripdata_in$n / tripdata_in$tot_E) 
+tripdata_in[c("total_jobs_S")] <-
+  map(tripdata_in[c("total_jobs_S")],function(x) ave(x,tripdata_in$TRACTCE_E,FUN=sum))
+colnames(tripdata_in)[7] <- "total_jobs_Sweight"
+
+tripdata_in$Trips_osriver_E <- ifelse(tripdata_in$EOR_E!=tripdata_in$EOR_S,
+                                      tripdata_in$n,0)
+tripdata_in$Trips_osriver_S <- ifelse(tripdata_in$EOR_E!=tripdata_in$EOR_S,
+                                      tripdata_in$n,0)
+# For each ending tract, count starting trips that are from other side of river
+tripdata_in$Trips_osriver_S <- ave(tripdata_in$Trips_osriver_S,tripdata_in$TRACTCE_E,FUN=sum)
+tripdata_in$Trips_osriver_E <- ave(tripdata_in$Trips_osriver_E,tripdata_in$TRACTCE_S,FUN=sum)
+
+# For each ending tract, share of starting trips from other side of river among total number of trips going into this tract, tot_E
+tripdata_in$ShareTrips_osriver_E <- tripdata_in$Trips_osriver_E/tripdata_in$tot_S
+tripdata_in$ShareTrips_osriver_S <- tripdata_in$Trips_osriver_S/tripdata_in$tot_E
+
+# if merge by _S, then it is for average intrip features, calculate by _E
+tripdata_in1 <- merge(x=tripdata_in,y=ACSdata,by.x=c("TRACTCE_S"), by.y=c("Geo2010"))
+tripdata_in1$PopShareW <- tripdata_in1$PopAloneW_2012_16 / (tripdata_in1$PopAloneW_2012_16 + tripdata_in1$PopAloneB_2012_16 + tripdata_in1$PopAloneH_2012_16 + tripdata_in1$PopAsianPINonHispBridge_2012_16)
+colnames(tripdata_in1)[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))] <- purrr::map_chr(colnames(tripdata_in1)[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))],paste0,"_S")
+tripdata_in1[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))] <-
+  map(tripdata_in1[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))],function(x) x * tripdata_in1$n / tripdata_in1$tot_E) 
+tripdata_in1[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))] <-
+  map(tripdata_in1[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))],function(x) ave(x,tripdata_in1$TRACTCE_E,FUN=sum))
+colnames(tripdata_in1)[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))] <- purrr::map_chr(colnames(tripdata_in1)[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))],paste0,"weight")
+#length(unique(tripdata_in1$TRACTCE_E))
+#length(unique(tripdata_in1$PopAsianPINonHispBridge_2012_16_Sweight))
+
+
+# merge by _E, then it is for average outtrip features, calculate by _S
+tripdata_in1 <- merge(x=tripdata_in1,y=ACSdata,by.x=c("TRACTCE_E"), by.y=c("Geo2010"))
+tripdata_in1$PopShareW <- tripdata_in1$PopAloneW_2012_16 / (tripdata_in1$PopAloneW_2012_16 + tripdata_in1$PopAloneB_2012_16 + tripdata_in1$PopAloneH_2012_16 + tripdata_in1$PopAsianPINonHispBridge_2012_16)
+colnames(tripdata_in1)[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))] <- purrr::map_chr(colnames(tripdata_in1)[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))],paste0,"_E")
+tripdata_in1[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))] <-
+  map(tripdata_in1[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))],function(x) x * tripdata_in1$n / tripdata_in1$tot_S)
+tripdata_in1[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))] <-
+  map(tripdata_in1[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))],function(x) ave(x,tripdata_in1$TRACTCE_S,FUN=sum))
+colnames(tripdata_in1)[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))] <- purrr::map_chr(colnames(tripdata_in1)[(length(colnames(tripdata_in1)) - 16):length(colnames(tripdata_in1))],paste0,"weight")
+#length(unique(tripdata_in1$TRACTCE_S))
+#length(unique(tripdata_in1$PopAsianPINonHispBridge_2012_16_Eweight))
+```
+
+```{r Missing value}
+unique(ACSdata$Geo2010[is.na(ACSdata$pctfamover75K)])
+unique(ACSdata$Geo2010[is.na(ACSdata$pctchildabovepov)])
+
+##006202, only 8 units next to the river
+sum(is.na(ACSdata$pctfamover75K)) 
+## 006202, and 000201 and 010800, georgetown university and george washington university
+sum(is.na(ACSdata$pctchildabovepov)) 
+
+## Columns removed
+tripdata_in1 <- tripdata_in1[!grepl('pctfamover75',colnames(tripdata_in1))]
+tripdata_in1 <- tripdata_in1[!grepl('pctchildabovepov',colnames(tripdata_in1))]
+
+rm(tripdata, ACSdata, datadir, wddir, tripdata_in)
+```
+```{r calculate difference}
+## Based on all pairs of tract weighted features, generate relative difference
+#a
+tripdata_in1$tot_diff <- tripdata_in1$tot_E/tripdata_in1$tot_S
+tripdata_in1$Tothousing_diff <- tripdata_in1$Tothousing_Eweight/tripdata_in1$Tothousing_Sweight
+#b
+tripdata_in1$ShareTrips_osriver_diff <- tripdata_in1$ShareTrips_osriver_E - tripdata_in1$ShareTrips_osriver_S
+tripdata_in1$unemploy_diff <- tripdata_in1$unemploymentrate_Eweight-tripdata_in1$unemploymentrate_Sweight
+tripdata_in1$ownership_diff <- tripdata_in1$ownership_Eweight-tripdata_in1$ownership_Sweight
+tripdata_in1$pctabovepov_diff <- tripdata_in1$pctabovepov_Eweight-tripdata_in1$pctabovepov_Sweight
+tripdata_in1$pctearningover75k_diff <- tripdata_in1$pctearningover75K_Eweight-tripdata_in1$pctearningover75K_Sweight
+tripdata_in1$pctcostburden_diff <- tripdata_in1$pctcostburden_Eweight-tripdata_in1$pctcostburden_Sweight
+tripdata_in1$commuteunder45_diff <- tripdata_in1$commuteunder45_Eweight-tripdata_in1$commuteunder45_Sweight
+tripdata_in1$violentcrimerate_diff <- tripdata_in1$violentcrimerate_Eweight-tripdata_in1$violentcrimerate_Sweight
+tripdata_in1$PopShareW_diff <- tripdata_in1$PopShareW_Eweight-tripdata_in1$PopShareW_Sweight
+
+#c
+tripdata_in1$FamilyHHTot_diff <- tripdata_in1$FamilyHHTot_2012_16_Eweight/tripdata_in1$FamilyHHTot_2012_16_Sweight
+tripdata_in1$PctCol_diff <- tripdata_in1$PctCol_Eweight/tripdata_in1$PctCol_Sweight
+
+```
+
+```{r write csv}
+ACSfiledir <- "D:\\Users\\RWang\\Box Sync\\Inclusion&Innovation\\Data Collection and Process\\DC neighborhoods"
+setwd(ACSfiledir)
+write.csv(tripdata_in1, file = "Weighted_in&out_tract_features.csv", row.names = FALSE)
+rm(ACSfiledir)
+```
